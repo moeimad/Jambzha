@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jambzha</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+    }
+
+    canvas {
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      background: #fff;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="ascii"></canvas>
+
+  <script>
+    const canvas = document.getElementById("ascii");
+    const ctx = canvas.getContext("2d");
+
+    const mask = document.createElement("canvas");
+    const mctx = mask.getContext("2d", { willReadFrequently: true });
+
+    const WORD = "Jambzha";
+    const CHARS = "01<>[]{}\\/|#@%&*+=-:;.,_";
+
+    let W = 0;
+    let H = 0;
+    let dpr = 1;
+    let points = [];
+    let fontSize = 0;
+    let cell = 10;
+
+    function resize() {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      W = window.innerWidth;
+      H = window.innerHeight;
+
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      canvas.style.width = W + "px";
+      canvas.style.height = H + "px";
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      mask.width = Math.round(W);
+      mask.height = Math.round(H);
+
+      buildMask();
+    }
+
+    function buildMask() {
+      points = [];
+
+      mctx.clearRect(0, 0, W, H);
+      mctx.fillStyle = "#000";
+      mctx.textAlign = "center";
+      mctx.textBaseline = "middle";
+
+      // Fit the word tightly while keeping breathing room.
+      fontSize = Math.min(H * 0.34, W * 0.205);
+      mctx.font = `900 ${fontSize}px Arial Black, Arial, Helvetica, sans-serif`;
+
+      while (mctx.measureText(WORD).width > W * 0.86 && fontSize > 40) {
+        fontSize -= 2;
+        mctx.font = `900 ${fontSize}px Arial Black, Arial, Helvetica, sans-serif`;
+      }
+
+      mctx.fillText(WORD, W / 2, H / 2);
+
+      const image = mctx.getImageData(0, 0, W, H).data;
+
+      cell = Math.max(6, Math.round(fontSize / 28));
+
+      for (let y = cell / 2; y < H; y += cell) {
+        for (let x = cell / 2; x < W; x += cell) {
+          const px = Math.floor(x);
+          const py = Math.floor(y);
+          const alpha = image[(py * W + px) * 4 + 3];
+
+          if (alpha > 80) {
+            points.push({
+              x,
+              y,
+              seed: Math.random() * 1000,
+              speed: 0.7 + Math.random() * 1.8
+            });
+          }
+        }
+      }
+    }
+
+    function noise(v) {
+      return Math.sin(v * 12.9898) * 43758.5453 % 1;
+    }
+
+    function draw(t) {
+      const time = t * 0.001;
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = `700 ${Math.max(7, cell * 0.95)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+
+      // Scan band crossing the word, producing the strongest distortion.
+      const scanY = H * (0.46 + Math.sin(time * 0.75) * 0.14);
+
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+
+        const wave =
+          Math.sin(p.x * 0.015 + time * 4.2 + p.seed) +
+          Math.sin(p.y * 0.022 - time * 3.1 + p.seed * 0.4);
+
+        const scanDistance = Math.abs(p.y - scanY);
+        const scanStrength = Math.max(0, 1 - scanDistance / (fontSize * 0.18));
+
+        const flicker = Math.sin(time * 9 * p.speed + p.seed * 5);
+        const glitch = Math.random() < 0.012 + scanStrength * 0.035;
+
+        let x = p.x;
+        let y = p.y;
+
+        if (glitch) {
+          x += (Math.random() - 0.5) * cell * (2 + scanStrength * 7);
+        }
+
+        y += wave * 0.22;
+
+        const charIndex = Math.abs(
+          Math.floor(
+            p.seed * 17 +
+            time * (7 + p.speed * 5) +
+            wave * 3 +
+            scanStrength * 18
+          )
+        ) % CHARS.length;
+
+        let alpha = 0.70 + (flicker + 1) * 0.10;
+        alpha += scanStrength * 0.16;
+
+        // Occasional holes make the text feel digitally unstable.
+        if (Math.random() < 0.01 + scanStrength * 0.02) {
+          alpha *= 0.12;
+        }
+
+        ctx.fillStyle = `rgba(0,0,0,${Math.min(alpha, 1)})`;
+        ctx.fillText(CHARS[charIndex], x, y);
+      }
+
+      // Sparse fragments just outside the word during the scan.
+      ctx.font = `600 ${Math.max(7, cell * 0.86)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+
+      const fragmentCount = Math.min(42, Math.floor(points.length / 120));
+      for (let i = 0; i < fragmentCount; i++) {
+        if (Math.random() > 0.40) continue;
+
+        const p = points[Math.floor(Math.random() * points.length)];
+        const dist = Math.abs(p.y - scanY);
+
+        if (dist < fontSize * 0.16) {
+          const side = Math.random() > 0.5 ? 1 : -1;
+          const fx = p.x + side * (cell * (1 + Math.random() * 7));
+          const fy = p.y + (Math.random() - 0.5) * cell * 2;
+
+          ctx.fillStyle = `rgba(0,0,0,${0.08 + Math.random() * 0.22})`;
+          ctx.fillText(
+            CHARS[Math.floor(Math.random() * CHARS.length)],
+            fx,
+            fy
+          );
+        }
+      }
+
+      requestAnimationFrame(draw);
+    }
+
+    window.addEventListener("resize", resize);
+
+    resize();
+    requestAnimationFrame(draw);
+  </script>
+</body>
+</html>
